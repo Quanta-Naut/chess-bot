@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { playMove, setSoundEnabled, soundEnabled } from "../lib/sound";
 
 export function Settings({ onSaved }: { onSaved: () => void }) {
   const profile = useQuery(api.profile.get);
@@ -20,6 +21,7 @@ function SettingsForm({
   const [chesscom, setChesscom] = useState(profile.chesscom ?? "");
   const [lichess, setLichess] = useState(profile.lichess ?? "");
   const [busy, setBusy] = useState(false);
+  const [sound, setSound] = useState(soundEnabled);
   const changed = chesscom.trim() !== (profile.chesscom ?? "") || lichess.trim() !== (profile.lichess ?? "");
 
   const save = async () => {
@@ -55,6 +57,24 @@ function SettingsForm({
             {busy ? "Saving..." : "Save & import games"}
           </button>
         </div>
+      </section>
+
+      <section className="card row">
+        <div className="grow">
+          <h2>Move sounds</h2>
+          <p className="muted small">Play a sound when pieces move on the board.</p>
+        </div>
+        <button
+          className={`btn sm ${sound ? "grape" : "ghost"}`}
+          aria-pressed={sound}
+          onClick={() => {
+            setSoundEnabled(!sound);
+            setSound(!sound);
+            if (!sound) playMove("move");
+          }}
+        >
+          {sound ? "On" : "Off"}
+        </button>
       </section>
 
       {profile.email && (

@@ -10,6 +10,7 @@ import { Badge } from "../components/Badge";
 import { LABELS } from "../lib/labelMeta";
 import type { PositionEval } from "../lib/engine";
 import { engineLine, explain, praise } from "../lib/explain";
+import { playMove, soundFor } from "../lib/sound";
 import {
   basicLabel,
   evaluateFen,
@@ -257,6 +258,17 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
   })();
   const shownIsMine = shown ? shown.white === (me === "white") : false;
   const shownIsBad = !!shown?.label && BAD.includes(shown.label);
+
+  // a sound whenever the board changes: the move's own sound when stepping onto it, a plain one otherwise
+  const lastFen = useRef(fen);
+  const shownSan = shown?.san;
+  const shownBefore = shown?.before;
+  useEffect(() => {
+    if (lastFen.current === fen) return;
+    const forward = shownSan !== undefined && lastFen.current === shownBefore;
+    lastFen.current = fen;
+    playMove(forward ? soundFor(shownSan) : "move");
+  }, [fen, shownSan, shownBefore]);
 
   // positions the engine should look at, most urgent first: what's on screen, the branch, then the next game move
   const wanted = [
