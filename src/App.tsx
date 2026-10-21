@@ -3,27 +3,33 @@ import { Authenticated, AuthLoading, Unauthenticated } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import type { Id } from "../convex/_generated/dataModel";
 import { SignIn } from "./components/SignIn";
+import { Sidebar, type Page } from "./components/Sidebar";
 import { Games } from "./pages/Games";
 import { Review } from "./pages/Review";
+import { Settings } from "./pages/Settings";
 
 function Shell() {
   const { signOut } = useAuthActions();
+  const [page, setPage] = useState<Page>("games");
   const [gameId, setGameId] = useState<Id<"games"> | null>(null);
+
+  const navigate = (p: Page) => {
+    setGameId(null);
+    setPage(p);
+  };
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="brand">Pawnie</div>
-        {gameId && (
-          <button className="btn ghost sm" onClick={() => setGameId(null)}>
-            ← My games
-          </button>
+      <Sidebar page={page} onNavigate={navigate} onSignOut={() => void signOut()} />
+      <main className="page">
+        {page === "settings" ? (
+          <Settings onSaved={() => navigate("games")} />
+        ) : gameId ? (
+          <Review gameId={gameId} />
+        ) : (
+          <Games openGame={setGameId} openSettings={() => navigate("settings")} />
         )}
-        <button className="btn ghost sm" onClick={() => void signOut()}>
-          Sign out
-        </button>
-      </header>
-      <main className="page">{gameId ? <Review gameId={gameId} /> : <Games openGame={setGameId} />}</main>
+      </main>
     </div>
   );
 }

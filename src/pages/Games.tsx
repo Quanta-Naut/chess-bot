@@ -11,15 +11,11 @@ const GRID_SIZE = 24;
 const resultFor = (result: string, color: "white" | "black") =>
   result === "1/2-1/2" ? "draw" : (result === "1-0") === (color === "white") ? "win" : "loss";
 
-export function Games({ openGame }: { openGame: (id: Id<"games">) => void }) {
+export function Games({ openGame, openSettings }: { openGame: (id: Id<"games">) => void; openSettings: () => void }) {
   const profile = useQuery(api.profile.get);
   const games = useQuery(api.games.list);
   const importBatch = useMutation(api.games.importBatch);
-  const saveProfile = useMutation(api.profile.set);
 
-  const [chesscom, setChesscom] = useState("");
-  const [lichess, setLichess] = useState("");
-  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoSynced = useRef(false);
@@ -55,63 +51,25 @@ export function Games({ openGame }: { openGame: (id: Id<"games">) => void }) {
     void sync(profile.chesscom, profile.lichess);
   }, [profile, sync]);
 
-  const connect = async () => {
-    autoSynced.current = true;
-    await saveProfile({ chesscom, lichess });
-    setEditing(false);
-    await sync(chesscom, lichess);
-  };
-
   return (
     <div className="stack">
       <div className="row page-head">
         <h1>Latest games</h1>
-        {hasAccounts && !editing && (
-          <>
-            <button className="btn sm" disabled={busy} onClick={() => void sync(profile?.chesscom, profile?.lichess)}>
-              {busy ? "Refreshing..." : "Refresh"}
-            </button>
-            <button
-              className="btn ghost sm"
-              onClick={() => {
-                setChesscom(profile?.chesscom ?? "");
-                setLichess(profile?.lichess ?? "");
-                setEditing(true);
-              }}
-            >
-              Accounts
-            </button>
-          </>
+        {hasAccounts && (
+          <button className="btn sm" disabled={busy} onClick={() => void sync(profile?.chesscom, profile?.lichess)}>
+            {busy ? "Refreshing..." : "Refresh"}
+          </button>
         )}
       </div>
 
-      {!hasAccounts || editing ? (
-        <div className="card stack account-form">
-          <p className="muted small" style={{ margin: 0 }}>
-            Add your chess.com and/or Lichess username (no password needed).
-          </p>
-          <div className="row">
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <label htmlFor="cc">chess.com</label>
-              <input id="cc" type="text" value={chesscom} onChange={(e) => setChesscom(e.target.value)} placeholder="username" />
-            </div>
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <label htmlFor="li">Lichess</label>
-              <input id="li" type="text" value={lichess} onChange={(e) => setLichess(e.target.value)} placeholder="username" />
-            </div>
-          </div>
-          <div className="row">
-            <button className="btn grape" disabled={busy || (!chesscom.trim() && !lichess.trim())} onClick={() => void connect()}>
-              {busy ? "Fetching..." : "Save & import games"}
-            </button>
-            {editing && (
-              <button className="btn ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </button>
-            )}
-          </div>
+      {profile && !hasAccounts && (
+        <div className="card row">
+          <span className="grow">Add your chess.com or Lichess username to bring in your games.</span>
+          <button className="btn grape sm" onClick={openSettings}>
+            Open settings
+          </button>
         </div>
-      ) : null}
+      )}
 
       {error && <div className="error">{error}</div>}
 

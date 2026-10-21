@@ -11,7 +11,8 @@ export const get = query({
       .query("profiles")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-    return p ?? { chesscom: undefined, lichess: undefined, model: undefined };
+    const user = await ctx.db.get("users", userId);
+    return { chesscom: p?.chesscom, lichess: p?.lichess, model: p?.model, email: user?.email };
   },
 });
 
