@@ -3,7 +3,14 @@ import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, internalQuery, query } from "./_generated/server";
 
-const DEFAULT_MODEL = "openrouter/free";
+// Tried in order, skipping any without a key: Vercel AI Gateway first, then OpenRouter's free router
+// (also the fallback when the gateway's free tier hits its 5 requests a minute). Both speak the OpenAI chat API.
+const PROVIDERS = [
+  // thinking off: a two-sentence note doesn't need it, and with it off Nemotron answers in about a second
+  { name: "AI Gateway", url: "https://ai-gateway.vercel.sh/v1/chat/completions", env: "AI_GATEWAY_API_KEY", model: "nvidia/nemotron-3.5-lightning-free", think: false },
+  { name: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", env: "OPENROUTER_API_KEY", model: "openrouter/free", think: true },
+] as const;
+type Provider = (typeof PROVIDERS)[number];
 const MAX_CHARS = 400;
 const MIN_CHARS = 40;
 const ATTEMPTS = 3;
@@ -27,20 +34,23 @@ const factsValidator = v.object({
 const SYSTEM = `You write the coaching note on a chess game-review card, speaking to the player as "you".
 Write 1-2 short sentences, at most 40 words, plain text with no markdown and no headings.
 Use ONLY the facts you are given. Never invent moves, captures, threats or evaluations, and never suggest a move that isn't in the facts.
+Never name a piece, square or plan that isn't in the facts: if you aren't told where a piece came from or what it attacks, don't say.
 The "Engine finding" is verified: keep its meaning exactly, but explain the idea behind it in human terms (what it attacks, what it gives up, what plan it starts).
 Be careful about sides: "you" are the player named in the facts, "your opponent" is the other side.
 Don't open by restating the move or its label; the card already shows them.`;
 
 function prompt(f: Infer<typeof factsValidator>): string {
   const opp = f.myColor === "white" ? "Black" : "White";
+  const mover = f.mine ? (f.myColor === "white" ? "White" : "Black") : opp;
   const lines = [
     `You play ${f.myColor === "white" ? "White" : "Black"}; your opponent plays ${opp}.`,
     `Move: ${f.move}, played by ${f.mine ? "you" : "your opponent"}.`,
     `Verdict: ${f.label}.`,
     `Evaluation from your side: ${f.evalBefore} before the move, ${f.evalAfter} after it.`,
   ];
-  if (f.better) lines.push(`Stronger move the engine preferred: ${f.better}.`);
+  if (f.better) lines.push(`Stronger move the engine preferred for ${mover} instead: ${f.better}.`);
   if (f.line) lines.push(`${f.lineTag ?? "Engine line"}: ${f.line}`);
+  if (f.line) lines.push(`In the line, "12. Nf3" is a White move and "12… Nf6" is a Black move. Never tell the player to play one of their opponent's moves.`);
   if (f.finding) lines.push(`Engine finding: ${f.finding}`);
   lines.push(
     f.mine
@@ -66,7 +76,7 @@ export const note = query({
 
 export const context = internalQuery({
   args: { userId: v.id("users"), key: v.string() },
-  returns: v.object({ cached: v.boolean(), model: v.string() }),
+  returns: v.object({ cached: v.boolean(), model: v.optional(v.string()) }),
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("coachNotes")
@@ -76,7 +86,7 @@ export const context = internalQuery({
       .query("profiles")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .unique();
-    return { cached: row !== null, model: profile?.model || DEFAULT_MODEL };
+    return { cached: row !== null, model: profile?.model || undefined };
   },
 });
 
@@ -100,34 +110,37 @@ export const explain = action({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not signed in");
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return null;
-
     const { cached, model } = await ctx.runQuery(internal.coach.context, { userId, key: args.key });
     if (cached) return null;
 
-    // openrouter/free picks a model at random and some picks can't do this job, so check the answer and re-roll
-    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-      const out = await ask(apiKey, model, args.facts);
-      if (out === "stop") return null;
-      if (!out) continue;
-      await ctx.runMutation(internal.coach.save, { userId, key: args.key, text: out.text, model: out.model });
-      return null;
+    for (const provider of PROVIDERS) {
+      const apiKey = process.env[provider.env];
+      if (!apiKey) continue;
+      // a model can still give an unusable answer (openrouter/free even picks one at random), so check it and retry
+      for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+        const out = await ask(provider, apiKey, model ?? provider.model, args.facts);
+        if (out === "stop") break; // rate limit or bad key: try the next provider
+        if (!out) continue;
+        await ctx.runMutation(internal.coach.save, { userId, key: args.key, text: out.text, model: out.model });
+        return null;
+      }
     }
     return null;
   },
 });
 
-/** One OpenRouter call. null = unusable answer (worth retrying), "stop" = don't retry (rate limit, bad key). */
-async function ask(apiKey: string, model: string, facts: Infer<typeof factsValidator>) {
+/** One chat call. null = unusable answer (worth retrying), "stop" = don't retry (rate limit, bad key). */
+async function ask(provider: Provider, apiKey: string, model: string, facts: Infer<typeof factsValidator>) {
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const res = await fetch(provider.url, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "X-Title": "Pawnie" },
       body: JSON.stringify({
         model,
-        // free picks are often thinking models: leave room for the thinking before the answer
-        max_tokens: 2000,
+        // where thinking stays on (openrouter/free's random picks), leave room for it before the answer
+        max_tokens: provider.think ? 2000 : 400,
+        temperature: 0.2, // stick to the facts rather than embellish
+        ...(provider.think ? {} : { reasoning: { enabled: false } }),
         messages: [
           { role: "system", content: SYSTEM },
           { role: "user", content: prompt(facts) },
@@ -136,7 +149,7 @@ async function ask(apiKey: string, model: string, facts: Infer<typeof factsValid
       signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
-      console.warn("coach: OpenRouter returned", res.status, (await res.text()).slice(0, 300));
+      console.warn(`coach: ${provider.name} returned`, res.status, (await res.text()).slice(0, 300));
       return res.status >= 500 ? null : "stop";
     }
     const body = (await res.json()) as { model?: string; choices?: { message?: { content?: unknown } }[] };

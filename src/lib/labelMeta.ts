@@ -9,5 +9,6 @@ export const LABELS: Record<Label, { sym: string; title: string }> = {
   book: { sym: "📖", title: "Book" },
   inaccuracy: { sym: "?!", title: "Inaccuracy" },
   mistake: { sym: "?", title: "Mistake" },
+  miss: { sym: "✗", title: "Miss" },
   blunder: { sym: "??", title: "Blunder" },
 };

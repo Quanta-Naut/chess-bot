@@ -21,6 +21,11 @@ function parseScore(line: string, whiteToMove: boolean): number | null {
   return (n > 0 ? MATE - n : -MATE - n) * side;
 }
 
+export interface SearchResult {
+  best: string;
+  lines: { cp: number; pv: string[] }[];
+}
+
 export class Engine {
   private worker: Worker;
   private ready: Promise<void>;
@@ -54,38 +59,43 @@ export class Engine {
     await readyok;
   }
 
-  /** Analyse one position to a fixed depth. Calls are queued so they never overlap. */
-  evaluate(fen: string, depth: number): Promise<PositionEval> {
-    const run = async (): Promise<PositionEval> => {
+  /**
+   * Run one search: `options` are UCI setoption lines sent first (they stay set on this engine),
+   * `go` is the search limit, e.g. "depth 14" or "movetime 500". Calls are queued so they never overlap.
+   * Lines are indexed by MultiPV rank (0 = best), scores from White's point of view.
+   */
+  search(fen: string, go: string, options: string[] = []): Promise<SearchResult> {
+    const run = async (): Promise<SearchResult> => {
       await this.ready;
       const whiteToMove = fen.split(" ")[1] === "w";
       return new Promise((resolve) => {
-        const lines: Record<number, { cp: number; pv: string[] }> = {};
+        const lines: { cp: number; pv: string[] }[] = [];
         this.handler = (line) => {
           if (line.startsWith("info") && line.includes(" pv ") && line.includes("score")) {
             const mp = parseInt(line.match(/multipv (\d+)/)?.[1] ?? "1", 10);
             const cp = parseScore(line, whiteToMove);
-            if (cp !== null) lines[mp] = { cp, pv: line.split(" pv ")[1].trim().split(" ") };
+            if (cp !== null) lines[mp - 1] = { cp, pv: line.split(" pv ")[1].trim().split(" ") };
           } else if (line.startsWith("bestmove")) {
             this.handler = null;
             const best = line.split(" ")[1];
-            const top = lines[1];
-            resolve({
-              cp: top?.cp ?? 0,
-              best: best && best !== "(none)" ? best : "",
-              secondCp: lines[2]?.cp ?? null,
-              pv: top?.pv ?? [],
-            });
+            resolve({ best: best && best !== "(none)" ? best : "", lines: lines.filter(Boolean) });
           }
         };
-        this.worker.postMessage("ucinewgame");
+        for (const o of options) this.worker.postMessage(o);
+        // no "ucinewgame": keeping the hash from nearby positions makes the next search much faster
         this.worker.postMessage(`position fen ${fen}`);
-        this.worker.postMessage(`go depth ${depth}`);
+        this.worker.postMessage(`go ${go}`);
       });
     };
     const p = this.busy.then(run, run);
     this.busy = p.catch(() => undefined);
     return p;
+  }
+
+  /** Analyse one position to a fixed depth. */
+  async evaluate(fen: string, depth: number): Promise<PositionEval> {
+    const { best, lines } = await this.search(fen, `depth ${depth}`);
+    return { cp: lines[0]?.cp ?? 0, best, secondCp: lines[1]?.cp ?? null, pv: lines[0]?.pv ?? [] };
   }
 
   terminate() {
@@ -97,4 +107,18 @@ let shared: Engine | null = null;
 export function getEngine(): Engine {
   if (!shared) shared = new Engine();
   return shared;
+}
+
+let pool: Engine[] | null = null;
+/**
+ * Engines for analysing a whole game in parallel, one per spare CPU core (2 to 6).
+ * The first is the shared engine; the rest stay alive for the next game.
+ */
+export function getPool(): Engine[] {
+  if (!pool) {
+    const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 2 : 2;
+    const n = Math.max(2, Math.min(6, cores - 1));
+    pool = [getEngine(), ...Array.from({ length: n - 1 }, () => new Engine())];
+  }
+  return pool;
 }

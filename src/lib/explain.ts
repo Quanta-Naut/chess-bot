@@ -7,8 +7,23 @@ const NAME: Record<PieceSymbol, string> = { p: "pawn", n: "knight", b: "bishop",
 const LINE_PLIES = 10;
 const SHOWN_PLIES = 6;
 
+/** What kind of error a bad move was, for the puzzles and the insights report. */
+export type MistakeKind = "allowed-mate" | "missed-mate" | "threw-win" | "fork" | "hanging" | "lost-material" | "missed-win" | "positional";
+
+export const KIND_TEXT: Record<MistakeKind, string> = {
+  "allowed-mate": "Allowed checkmate",
+  "missed-mate": "Missed checkmate",
+  "threw-win": "Let a win slip into a draw",
+  fork: "Walked into a fork",
+  hanging: "Left a piece hanging",
+  "lost-material": "Lost material",
+  "missed-win": "Missed winning material",
+  positional: "Worsened the position",
+};
+
 export interface Insight {
   reason: string;
+  kind: MistakeKind;
   /** the opponent's best answer (uci) and the engine line it starts, numbered SAN */
   reply?: string;
   replySan?: string;
@@ -126,6 +141,7 @@ export function explain(before: string, playedUci: string, beforeEval: PositionE
   const reply = walk(after, afterEval.pv, mover);
   const insight: Insight = {
     reason: "",
+    kind: "positional",
     better,
     reply: afterEval.pv[0],
     replySan: reply.moves[0]?.san,
@@ -139,18 +155,21 @@ export function explain(before: string, playedUci: string, beforeEval: PositionE
   if (afterCp <= -(MATE - 200)) {
     const n = MATE + afterCp;
     insight.reason = n <= 1 ? `It allows checkmate with ${insight.replySan}.` : `It allows a forced mate in ${n}, starting with ${insight.replySan}.`;
+    insight.kind = "allowed-mate";
     return insight;
   }
 
   if (beforeCp >= MATE - 200 && afterCp < MATE - 200) {
     const n = MATE - beforeCp;
     insight.reason = n <= 1 ? `${Subj} had mate in one with ${better}.` : `${Subj} had a forced mate in ${n}, starting with ${better}.`;
+    insight.kind = "missed-mate";
     return insight;
   }
 
   const ended = new Chess(after);
   if (ended.isDraw() && beforeCp > 150) {
     insight.reason = ended.isStalemate() ? "It's stalemate, so a winning position ends in a draw." : "It lets a winning position slip into a draw.";
+    insight.kind = "threw-win";
     return insight;
   }
 
@@ -160,14 +179,17 @@ export function explain(before: string, playedUci: string, beforeEval: PositionE
     const fork = forked(new Chess(first.after), first.to, mover);
     if (fork.length >= 2) {
       insight.reason = `${first.san} forks ${poss} ${fork.slice(0, 2).map((t) => NAME[t]).join(" and ")}. ${Subj} end up ${amount(lost)} down.`;
+      insight.kind = "fork";
     } else if (first.captured && VALUE[first.captured] >= 3) {
       const piece = `${poss} ${NAME[first.captured]} on ${first.to}`;
       insight.reason =
         first.to === played.to
           ? `It leaves ${piece} hanging, and ${first.san} takes it. ${Subj} end up ${amount(lost)} down.`
           : `It drops ${piece}: ${first.san} takes it. ${Subj} end up ${amount(lost)} down.`;
+      insight.kind = "hanging";
     } else {
       insight.reason = `After ${first.san}, ${subj} can't avoid losing material and end up ${amount(lost)} down.`;
+      insight.kind = "lost-material";
     }
     return insight;
   }
@@ -176,6 +198,7 @@ export function explain(before: string, playedUci: string, beforeEval: PositionE
     const gain = walk(before, beforeEval.pv, mover).final - startBalance;
     if (gain >= 2) {
       insight.reason = `${Subj} missed ${better}, which wins ${amount(gain)}.`;
+      insight.kind = "missed-win";
       return insight;
     }
   }
@@ -186,6 +209,6 @@ export function explain(before: string, playedUci: string, beforeEval: PositionE
     standing(wpBefore) !== standing(wpAfter)
       ? `It turns a ${standing(wpBefore)} position into a ${standing(wpAfter)} one.`
       : `It throws away ${Math.round(wpBefore - wpAfter)}% of ${poss} winning chances.`;
-  if (insight.replySan) insight.reason += ` ${insight.replySan} is the strongest answer.`;
+  if (insight.replySan) insight.reason += ` ${mover === "w" ? "Black" : "White"}'s best reply is ${insight.replySan}.`;
   return insight;
 }

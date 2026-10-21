@@ -4,17 +4,24 @@ import { Chess, type Move } from "chess.js";
 import type { DrawShape } from "chessground/draw";
 import type { Key } from "chessground/types";
 import { api } from "../../convex/_generated/api";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import type { Doc } from "../../convex/_generated/dataModel";
 import { Board } from "../components/Board";
+import { Sheet } from "../components/Sheet";
+import { Loader } from "../components/Loader";
 import { Badge } from "../components/Badge";
 import { LABELS } from "../lib/labelMeta";
 import type { PositionEval } from "../lib/engine";
 import { engineLine, explain, praise } from "../lib/explain";
+import { positionInfo } from "../lib/position";
 import { playMove, soundFor } from "../lib/sound";
 import {
+  ANALYSIS_VERSION,
+  BAD_LABELS as BAD,
   basicLabel,
   evaluateFen,
   mateText,
+  moveLoss,
+  REVIEW_DEPTH,
   reviewGame,
   sideSummary,
   uciToSan,
@@ -23,8 +30,7 @@ import {
   type Label,
 } from "../lib/review";
 
-const BAD: Label[] = ["inaccuracy", "mistake", "blunder"];
-const DEPTH = 14;
+const DEPTH = REVIEW_DEPTH;
 // wait this long on a move before asking the AI, so stepping through a game doesn't burn requests
 const AI_DELAY_MS = 600;
 
@@ -42,14 +48,37 @@ interface BranchMove {
   fen: string;
 }
 
-/** A line the user played on the board, starting from mainline position `fromPly`. */
+/** A line played on the board (by the user, or the engine's best line), starting from mainline position `fromPly`. */
 interface Branch {
   fromPly: number;
   moves: BranchMove[];
+  engine?: boolean;
 }
 
-export function Review({ gameId }: { gameId: Id<"games"> }) {
-  const game = useQuery(api.games.get, { id: gameId });
+/** Where the board was before the engine line was turned on, to go back to when it's turned off. */
+interface Saved {
+  branch: Branch | null;
+  ply: number;
+  varIdx: number;
+}
+
+/** Play a UCI line from `fen` as branch moves, stopping at the first one that isn't legal. */
+function lineMoves(fen: string, pv: string[]): BranchMove[] {
+  const g = new Chess(fen);
+  const out: BranchMove[] = [];
+  for (const u of pv) {
+    try {
+      const mv = g.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] });
+      out.push({ san: mv.san, uci: u, from: mv.from, to: mv.to, before: mv.before, fen: mv.after });
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
+
+export function Review({ code }: { code: string }) {
+  const game = useQuery(api.games.get, { code });
 
   const replay = useMemo<Replay | null>(() => {
     if (!game) return null;
@@ -63,7 +92,7 @@ export function Review({ gameId }: { gameId: Id<"games"> }) {
     return { verbose, fens: [verbose[0]?.before ?? new Chess().fen(), ...verbose.map((m) => m.after)] };
   }, [game]);
 
-  if (game === undefined) return <p className="muted">Loading...</p>;
+  if (game === undefined) return <Loader label="Loading the game" />;
   if (game === null || !replay) return <p>Couldn't open that game.</p>;
   return <ReviewView game={game} replay={replay} />;
 }
@@ -79,7 +108,10 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
   // 0 = on the game line at `ply`; k > 0 = k moves into the branch (then ply === branch.fromPly)
   const [varIdx, setVarIdx] = useState(0);
   const [choosing, setChoosing] = useState(false);
+  // set while the engine line is on: what to restore when it's turned off
+  const [saved, setSaved] = useState<Saved | null>(null);
   const [flipped, setFlipped] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [evals, setEvals] = useState<Record<string, PositionEval>>({});
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,8 +130,8 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
     setError(null);
     setProgress({ done: 0, total: 1 });
     try {
-      const result = await reviewGame(game.pgn, game.myColor, DEPTH, (done, tot) => setProgress({ done, total: tot }));
-      await saveAnalysis({ id: game._id, analysis: result });
+      const { analysis: result, puzzles } = await reviewGame(game.pgn, game.myColor, DEPTH, (done, tot) => setProgress({ done, total: tot }));
+      await saveAnalysis({ id: game._id, analysis: result, puzzles });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analysis failed");
     } finally {
@@ -107,23 +139,14 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
     }
   }, [game, saveAnalysis]);
 
-  // analyse automatically when a game is opened for the first time
+  // analyse automatically the first time a game is opened, and again when the grading rules have changed since
   useEffect(() => {
-    if (game.analysis || started.current) return;
+    if (game.analysis?.version === ANALYSIS_VERSION || started.current) return;
     started.current = true;
     void runAnalysis();
   }, [game, runAnalysis]);
 
-  const position = useMemo(() => {
-    const g = new Chess(fen);
-    const dests = new Map<Key, Key[]>();
-    for (const m of g.moves({ verbose: true })) {
-      const list = dests.get(m.from) ?? [];
-      list.push(m.to);
-      dests.set(m.from, list);
-    }
-    return { dests, turn: g.turn() === "w" ? ("white" as const) : ("black" as const), check: g.inCheck() };
-  }, [fen]);
+  const position = useMemo(() => positionInfo(fen), [fen]);
 
   const summaries = useMemo(
     () => (analysis ? { white: sideSummary(analysis.moves, "white"), black: sideSummary(analysis.moves, "black") } : null),
@@ -136,8 +159,7 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
         const before = evals[m.before];
         const after = evals[m.fen];
         if (!before || !after) return { ...m, label: undefined, best: before?.best };
-        const sign = m.before.split(" ")[1] === "w" ? 1 : -1;
-        const loss = Math.max(0, winPct(before.cp * sign) - winPct(after.cp * sign));
+        const loss = moveLoss(before, after, m.uci, m.before.split(" ")[1] === "w");
         return { ...m, label: basicLabel(loss, m.uci === before.best), best: before.best };
       }) ?? [],
     [branch, evals],
@@ -173,13 +195,6 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
     setVarIdx(1);
   };
 
-  const dropBranch = () => {
-    if (!branch) return;
-    if (varIdx > 0) goMain(branch.fromPly);
-    setChoosing(false);
-    setBranch(null);
-  };
-
   const onMove = (orig: Key, dest: Key) => {
     let mv: Move;
     try {
@@ -190,6 +205,8 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
     const uci = mv.from + mv.to + (mv.promotion ?? "");
     const next: BranchMove = { san: mv.san, uci, from: mv.from, to: mv.to, before: mv.before, fen: mv.after };
     setChoosing(false);
+    // a move of your own that leaves the engine line makes it your line from there on
+    if (saved && !(inBranch && branch.moves[varIdx]?.uci === uci)) setSaved(null);
     if (!inBranch) {
       const g = replay.verbose[ply];
       if (g && g.from + g.to + (g.promotion ?? "") === uci) return setPly(ply + 1);
@@ -201,23 +218,6 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
     setVarIdx(varIdx + 1);
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (e.key === "ArrowLeft") back();
-      else if (e.key === "ArrowRight") forward();
-      else if (e.key === "Enter" && choosing) enterBranch();
-      else if (e.key === "Escape" && choosing) setChoosing(false);
-      else if (e.key === "ArrowUp" || e.key === "Home") goMain(0);
-      else if (e.key === "ArrowDown" || e.key === "End") goMain(total);
-      else if (e.key === "f" || e.key === "F") setFlipped((f) => !f);
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
-
   // keep the current move visible
   useEffect(() => {
     const box = movesRef.current;
@@ -227,7 +227,10 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
     const elBox = el.getBoundingClientRect();
     if (elBox.top < b.top) box.scrollTop += elBox.top - b.top - 4;
     else if (elBox.bottom > b.bottom) box.scrollTop += elBox.bottom - b.bottom + 4;
-  }, [ply, varIdx, branch, analysis]);
+    // on phones the list is one line that scrolls sideways
+    if (elBox.left < b.left) box.scrollLeft += elBox.left - b.left - 40;
+    else if (elBox.right > b.right) box.scrollLeft += elBox.right - b.right + 40;
+  }, [ply, varIdx, branch, analysis, graded]); // graded: badges arriving can re-wrap the line
 
   const me = game.myColor;
   const bottom = flipped ? (me === "white" ? "black" : "white") : me;
@@ -270,9 +273,59 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
     playMove(forward ? soundFor(shownSan) : "move");
   }, [fen, shownSan, shownBefore]);
 
+  // Where the engine line would start: on a game move that wasn't the engine's choice, from the position
+  // before it (the engine's move replaces it); otherwise from the position on the board.
+  const engineStart = (() => {
+    if (inBranch) return { fen, fromPly: branch.fromPly, keep: branch.moves.slice(0, varIdx) };
+    const missed = !!shown?.label && !!shown.best && shown.best !== shown.uci && !["brilliant", "great", "book"].includes(shown.label);
+    return missed ? { fen: replay.fens[ply - 1], fromPly: ply - 1, keep: [] } : { fen, fromPly: ply, keep: [] };
+  })();
+  const engineMoves = saved ? [] : lineMoves(engineStart.fen, evals[engineStart.fen]?.pv ?? []);
+
+  const toggleEngineLine = () => {
+    setChoosing(false);
+    if (saved) {
+      setBranch(saved.branch);
+      setPly(saved.ply);
+      setVarIdx(saved.varIdx);
+      return setSaved(null);
+    }
+    if (!engineMoves.length) return;
+    setSaved({ branch, ply, varIdx });
+    setBranch({ fromPly: engineStart.fromPly, moves: [...engineStart.keep, ...engineMoves], engine: true });
+    setPly(engineStart.fromPly);
+    setVarIdx(engineStart.keep.length + 1);
+  };
+
+  const dropBranch = () => {
+    if (!branch) return;
+    if (saved) return toggleEngineLine();
+    if (varIdx > 0) goMain(branch.fromPly);
+    setChoosing(false);
+    setBranch(null);
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if (e.key === "ArrowLeft") back();
+      else if (e.key === "ArrowRight") forward();
+      else if (e.key === "Enter" && choosing) enterBranch();
+      else if (e.key === "Escape" && choosing) setChoosing(false);
+      else if (e.key === "ArrowUp" || e.key === "Home") goMain(0);
+      else if (e.key === "ArrowDown" || e.key === "End") goMain(total);
+      else if (e.key === "f" || e.key === "F") setFlipped((f) => !f);
+      else if (e.key === "e" || e.key === "E") toggleEngineLine();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   // positions the engine should look at, most urgent first: what's on screen, the branch, then the next game move
   const wanted = [
-    ...(shown ? [shown.after, ...(shownIsBad ? [shown.before] : [])] : [fen]),
+    ...(shown ? [shown.after, shown.before] : [fen]),
     ...(branch ? [replay.fens[branch.fromPly], ...branch.moves.map((m) => m.fen)] : []),
     ...(!inBranch && ply < total ? [replay.fens[ply + 1]] : []),
   ];
@@ -358,7 +411,8 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
       finding: card.reason,
     };
   })();
-  const aiKey = aiFacts && shown ? `${shown.before}|${shown.uci}|${shownIsMine ? "me" : "opp"}` : null;
+  // "v2": notes written before the grading and side-labelling fixes are not reused
+  const aiKey = aiFacts && shown ? `v2|${shown.before}|${shown.uci}|${shownIsMine ? "me" : "opp"}` : null;
   const aiNote = useQuery(api.coach.note, aiKey ? { key: aiKey } : "skip");
   const aiFactsRef = useRef(aiFacts);
   useEffect(() => {
@@ -407,7 +461,7 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
   const nextMistake = () => {
     if (!analysis) return;
     const mine = (i: number) => (replay.verbose[i].color === "w") === (me === "white");
-    const hit = (i: number) => mine(i) && (analysis.moves[i].label === "mistake" || analysis.moves[i].label === "blunder");
+    const hit = (i: number) => mine(i) && ["mistake", "miss", "blunder"].includes(analysis.moves[i].label);
     for (let i = ply; i < total; i++) if (hit(i)) return goMain(i + 1);
     for (let i = 0; i < ply; i++) if (hit(i)) return goMain(i + 1);
   };
@@ -418,7 +472,8 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
   const branchRow = branch ? (branch.fromPly >= total ? rows[rows.length - 1] : branch.fromPly - (branch.fromPly % 2)) : undefined;
 
   const branchLine = branch && (
-    <div className="branch">
+    <div className={`branch ${branch.engine ? "engine" : ""}`}>
+      {branch.engine && <span className="branch-tag">Engine</span>}
       {graded.map((m, k) => {
         const p = branch.fromPly + k;
         const no = p % 2 === 0 ? `${p / 2 + 1}.` : k === 0 ? `${(p + 1) / 2}…` : null;
@@ -439,10 +494,49 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
           </Fragment>
         );
       })}
-      <button className="branch-x" onClick={dropBranch} aria-label="Discard your line" title="Discard your line">
+      <button className="branch-x" onClick={dropBranch} aria-label={saved ? "Close the engine line" : "Discard your line"} title={saved ? "Close the engine line" : "Discard your line"}>
         ×
       </button>
     </div>
+  );
+
+  const evalStrip = (analysis || inBranch) && (
+    <div className={`eval-card ${inBranch ? "exploring" : ""}`}>
+      <div className="eval-item">
+        <span className="muted small">{inBranch ? (branch.engine ? "Engine line" : "Your line") : "Eval"}</span>
+        <b>{evalCp === undefined ? "…" : mateText(evalCp)}</b>
+      </div>
+      <div className="eval-item">
+        <span className="muted small">Played</span>
+        <b className="row-tight">
+          {shown?.label && <Badge label={shown.label} />}
+          {shown?.san ?? "–"}
+        </b>
+      </div>
+      <div className="eval-item">
+        <span className="muted small">Best</span>
+        <b>{bestNow ?? (inBranch && !evals[fen] ? "…" : "–")}</b>
+      </div>
+    </div>
+  );
+  const statsBlock = analysis && mySum && (
+    <>
+      <div className="counts-grid">
+        {COUNT_LINES.map((line) => (
+          <div key={line[0]} className="counts-line">
+            {line.map((label) => (
+              <div key={label} className="count-cell">
+                <Badge label={label} />
+                <b>{mySum.counts[label] ?? 0}</b>
+                <span className="muted tiny">{LABELS[label].title}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <Graph evals={[analysis.moves[0]?.bestCp ?? 0, ...analysis.moves.map((m) => m.cp)]} ply={ply} onPick={goMain} />
+    </>
   );
 
   return (
@@ -475,7 +569,7 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
                   </button>
                   <button className="fork-opt mine" onClick={enterBranch}>
                     <kbd>Enter</kbd>
-                    <span className="grow">Your line</span>
+                    <span className="grow">{branch.engine ? "Engine line" : "Your line"}</span>
                     <b>{branch.moves[0].san}</b>
                   </button>
                 </div>
@@ -505,25 +599,7 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
           </div>
         )}
 
-        {(analysis || inBranch) && (
-          <div className={`eval-card ${inBranch ? "exploring" : ""}`}>
-            <div className="eval-item">
-              <span className="muted small">{inBranch ? "Your line" : "Eval"}</span>
-              <b>{evalCp === undefined ? "…" : mateText(evalCp)}</b>
-            </div>
-            <div className="eval-item">
-              <span className="muted small">Played</span>
-              <b className="row-tight">
-                {shown?.label && <Badge label={shown.label} />}
-                {shown?.san ?? "–"}
-              </b>
-            </div>
-            <div className="eval-item">
-              <span className="muted small">Best</span>
-              <b>{bestNow ?? (inBranch && !evals[fen] ? "…" : "–")}</b>
-            </div>
-          </div>
-        )}
+        <div className="desk-contents">{evalStrip}</div>
 
         <div className={`insight ${card.label ? `q-${card.label}` : ""}`}>
           <div className="insight-head">
@@ -552,25 +628,7 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
           )}
         </div>
 
-        {analysis && mySum && (
-          <>
-            <div className="counts-grid">
-              {COUNT_LINES.map((line) => (
-                <div key={line[0]} className="counts-line">
-                  {line.map((label) => (
-                    <div key={label} className="count-cell">
-                      <Badge label={label} />
-                      <b>{mySum.counts[label] ?? 0}</b>
-                      <span className="muted tiny">{LABELS[label].title}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-
-            <Graph evals={[analysis.moves[0]?.bestCp ?? 0, ...analysis.moves.map((m) => m.cp)]} ply={ply} onPick={goMain} />
-          </>
-        )}
+        <div className="desk-contents">{statsBlock}</div>
 
         <div className="card flat moves-card">
           <div className="moves" ref={movesRef}>
@@ -584,6 +642,15 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
           </div>
           <div className="row controls">
             <span className="flip-spacer" />
+            <button
+              className={`btn sm ${saved ? "grape" : "ghost"} engine-btn`}
+              onClick={toggleEngineLine}
+              disabled={!saved && !engineMoves.length}
+              aria-pressed={!!saved}
+              title={saved ? "Back to the game (E)" : "Play out the engine's best line from here (E)"}
+            >
+              Best line
+            </button>
             <button className="btn sm" onClick={() => goMain(0)} aria-label="Start">
               ⏮
             </button>
@@ -601,12 +668,32 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
                 Next mistake
               </button>
             )}
+            <button className="btn sm ghost m-only stats-btn" onClick={() => setStatsOpen(true)} aria-label="More">
+              ⋯
+            </button>
             <button className="btn sm ghost flip" onClick={() => setFlipped((f) => !f)} aria-label="Flip board" title="Flip board (F)">
               ⇅
             </button>
           </div>
         </div>
       </div>
+      <Sheet open={statsOpen} onClose={() => setStatsOpen(false)} title="This game">
+        <div className="stack-tight">
+          <div className="sheet-tools">
+            <button className="btn sm ghost" onClick={() => { goMain(0); setStatsOpen(false); }}>
+              ⏮ Start
+            </button>
+            <button className="btn sm ghost" onClick={() => { goMain(total); setStatsOpen(false); }}>
+              End ⏭
+            </button>
+            <button className="btn sm ghost" onClick={() => { setFlipped((f) => !f); setStatsOpen(false); }}>
+              ⇅ Flip
+            </button>
+          </div>
+          {evalStrip}
+          {statsBlock}
+        </div>
+      </Sheet>
     </div>
   );
 }
@@ -632,12 +719,13 @@ const PHRASE: Record<Label, string> = {
   book: "a book move",
   inaccuracy: "an inaccuracy",
   mistake: "a mistake",
+  miss: "a miss",
   blunder: "a blunder",
 };
 
 const COUNT_LINES: Label[][] = [
   ["brilliant", "great", "best", "good"],
-  ["inaccuracy", "mistake", "blunder"],
+  ["inaccuracy", "mistake", "miss", "blunder"],
 ];
 
 function PlayerBar({ color, name, accuracy }: { color: "white" | "black"; name: string; accuracy?: number }) {

@@ -1,24 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
 import { fetchChessCom, fetchLichess, type ImportedGame } from "../lib/importGames";
 import { MiniBoard } from "../components/MiniBoard";
+import { Loader } from "../components/Loader";
 
 const MAX_GAMES = 30;
+// look back this far before the newest saved game, so a game that was still going on then isn't missed
+const OVERLAP_MS = 3 * 60 * 60 * 1000;
 const GRID_SIZE = 24;
 
 const resultFor = (result: string, color: "white" | "black") =>
   result === "1/2-1/2" ? "draw" : (result === "1-0") === (color === "white") ? "win" : "loss";
 
-export function Games({ openGame, openSettings }: { openGame: (id: Id<"games">) => void; openSettings: () => void }) {
+export function Games({ openGame, openSettings }: { openGame: (code: string) => void; openSettings: () => void }) {
   const profile = useQuery(api.profile.get);
   const games = useQuery(api.games.list);
   const importBatch = useMutation(api.games.importBatch);
+  const assignCodes = useMutation(api.games.assignCodes);
+  const needsCodes = games?.some((g) => !g.code) ?? false;
+
+  // games imported before games had links get their codes once
+  useEffect(() => {
+    if (needsCodes) void assignCodes();
+  }, [needsCodes, assignCodes]);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoSynced = useRef(false);
+  const gamesRef = useRef(games);
+  useEffect(() => {
+    gamesRef.current = games;
+  });
+
+  /** Fetch only games newer than this account's newest saved one (minus the overlap); undefined = fetch the latest MAX_GAMES. */
+  const sinceFor = (source: "chesscom" | "lichess", user: string) => {
+    const name = user.trim().toLowerCase();
+    const newest = gamesRef.current?.find((g) => g.source === source && (g.white.toLowerCase() === name || g.black.toLowerCase() === name));
+    return newest ? newest.playedAt - OVERLAP_MS : undefined;
+  };
 
   const hasAccounts = Boolean(profile?.chesscom || profile?.lichess);
 
@@ -28,9 +48,12 @@ export function Games({ openGame, openSettings }: { openGame: (id: Id<"games">) 
       setBusy(true);
       setError(null);
       try {
-        let all: ImportedGame[] = [];
-        if (cc) all = all.concat(await fetchChessCom(cc, MAX_GAMES));
-        if (li) all = all.concat(await fetchLichess(li, MAX_GAMES));
+        let all: ImportedGame[];
+        const [fromCc, fromLi] = await Promise.all([
+          cc ? fetchChessCom(cc, MAX_GAMES, sinceFor("chesscom", cc)) : [],
+          li ? fetchLichess(li, MAX_GAMES, sinceFor("lichess", li)) : [],
+        ]);
+        all = [...fromCc, ...fromLi];
         for (let i = 0; i < all.length; i += 50) {
           await importBatch({ games: all.slice(i, i + 50) });
         }
@@ -43,16 +66,16 @@ export function Games({ openGame, openSettings }: { openGame: (id: Id<"games">) 
     [importBatch],
   );
 
-  // keep the latest games fresh every time the page opens
+  // keep the latest games fresh every time the page opens, once the saved games are known
   useEffect(() => {
-    if (autoSynced.current || !profile) return;
+    if (autoSynced.current || !profile || games === undefined) return;
     if (!profile.chesscom && !profile.lichess) return;
     autoSynced.current = true;
     void sync(profile.chesscom, profile.lichess);
-  }, [profile, sync]);
+  }, [profile, games, sync]);
 
   return (
-    <div className="stack">
+    <div className="stack games-page">
       <div className="row page-head">
         <h1>Latest games</h1>
         {hasAccounts && (
@@ -74,7 +97,7 @@ export function Games({ openGame, openSettings }: { openGame: (id: Id<"games">) 
       {error && <div className="error">{error}</div>}
 
       {games === undefined ? (
-        <p className="muted">Loading...</p>
+        <Loader label="Loading your games" />
       ) : games.length === 0 ? (
         <p className="muted">{busy ? "Fetching your games..." : "No games yet."}</p>
       ) : (
@@ -83,7 +106,7 @@ export function Games({ openGame, openSettings }: { openGame: (id: Id<"games">) 
             const r = resultFor(g.result, g.myColor);
             const opp = g.myColor === "white" ? g.black : g.white;
             return (
-              <button key={g._id} className="game-card" onClick={() => openGame(g._id)}>
+              <button key={g._id} className="game-card" disabled={!g.code} onClick={() => g.code && openGame(g.code)}>
                 {g.finalFen ? (
                   <MiniBoard fen={g.finalFen} orientation={g.myColor} />
                 ) : (

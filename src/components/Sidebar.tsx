@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-export type Page = "games" | "settings";
+export type Page = "games" | "puzzles" | "insights" | "play" | "openings" | "settings";
 
 const STORAGE_KEY = "pawnie.sidebarOpen";
 
@@ -36,11 +36,36 @@ const GEAR = (
   </Icon>
 );
 
-const LOGOUT = (
+const PUZZLE = (
   <Icon>
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-    <polyline points="16 17 21 12 16 7" />
-    <line x1="21" y1="12" x2="9" y2="12" />
+    <path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3h7z" />
+  </Icon>
+);
+
+const CHART = (
+  <Icon>
+    <line x1="4" y1="20" x2="20" y2="20" />
+    <rect x="5" y="11" width="3" height="6" rx="1" />
+    <rect x="10.5" y="6" width="3" height="11" rx="1" />
+    <rect x="16" y="13" width="3" height="4" rx="1" />
+  </Icon>
+);
+
+const ROBOT = (
+  <Icon>
+    <rect x="4" y="8" width="16" height="12" rx="3" />
+    <line x1="12" y1="4" x2="12" y2="8" />
+    <circle cx="12" cy="3.5" r="1" />
+    <circle cx="9" cy="14" r="1.3" />
+    <circle cx="15" cy="14" r="1.3" />
+  </Icon>
+);
+
+const BOOK = (
+  <Icon>
+    <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" />
+    <path d="M4 21a2 2 0 0 1 2-2h13v2" />
+    <path d="M10 8l2 2 3-3" />
   </Icon>
 );
 
@@ -51,7 +76,7 @@ const CHEVRONS = (
   </Icon>
 );
 
-export function Sidebar({ page, onNavigate, onSignOut }: { page: Page; onNavigate: (p: Page) => void; onSignOut: () => void }) {
+export function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (p: Page) => void }) {
   const [open, setOpen] = useState(readOpen);
 
   const toggle = () => {
@@ -81,9 +106,12 @@ export function Sidebar({ page, onNavigate, onSignOut }: { page: Page; onNavigat
         <span className="side-label">Pawnie</span>
       </div>
       {item(GRID, "Games", () => onNavigate("games"), page === "games")}
+      {item(PUZZLE, "Puzzles", () => onNavigate("puzzles"), page === "puzzles")}
+      {item(CHART, "Insights", () => onNavigate("insights"), page === "insights")}
+      {item(ROBOT, "Play the bot", () => onNavigate("play"), page === "play")}
+      {item(BOOK, "Openings", () => onNavigate("openings"), page === "openings")}
       {item(GEAR, "Settings", () => onNavigate("settings"), page === "settings")}
       <div className="grow" />
-      {item(LOGOUT, "Sign out", onSignOut)}
       <button className="side-item side-toggle" onClick={toggle} aria-label={open ? "Collapse sidebar" : "Expand sidebar"} title={open ? undefined : "Expand"}>
         {CHEVRONS}
         <span className="side-label">Collapse</span>

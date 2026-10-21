@@ -4,6 +4,9 @@ import { ConvexReactClient } from "convex/react";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import "./index.css";
 import App from "./App.tsx";
+import { registerServiceWorker } from "./lib/install";
+
+registerServiceWorker();
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 

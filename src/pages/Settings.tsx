@@ -2,20 +2,23 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { playMove, setSoundEnabled, soundEnabled } from "../lib/sound";
+import { Loader } from "../components/Loader";
 
-export function Settings({ onSaved }: { onSaved: () => void }) {
+export function Settings({ onSaved, onSignOut }: { onSaved: () => void; onSignOut: () => void }) {
   const profile = useQuery(api.profile.get);
-  if (profile === undefined) return <p className="muted">Loading...</p>;
+  if (profile === undefined) return <Loader label="Loading settings" />;
   if (profile === null) return null;
-  return <SettingsForm key={profile.email ?? ""} profile={profile} onSaved={onSaved} />;
+  return <SettingsForm key={profile.email ?? ""} profile={profile} onSaved={onSaved} onSignOut={onSignOut} />;
 }
 
 function SettingsForm({
   profile,
   onSaved,
+  onSignOut,
 }: {
   profile: { chesscom?: string; lichess?: string; email?: string };
   onSaved: () => void;
+  onSignOut: () => void;
 }) {
   const saveProfile = useMutation(api.profile.set);
   const [chesscom, setChesscom] = useState(profile.chesscom ?? "");
@@ -41,7 +44,7 @@ function SettingsForm({
 
       <section className="card stack-tight">
         <h2>Chess accounts</h2>
-        <p className="muted small">Your chess.com and/or Lichess username. No password needed: games are read from their public APIs.</p>
+        <p className="muted small desk-only">Your chess.com and/or Lichess username. No password needed: games are read from their public APIs.</p>
         <div className="settings-fields">
           <div>
             <label htmlFor="cc">chess.com</label>
@@ -62,7 +65,7 @@ function SettingsForm({
       <section className="card row">
         <div className="grow">
           <h2>Move sounds</h2>
-          <p className="muted small">Play a sound when pieces move on the board.</p>
+          <p className="muted small desk-only">Play a sound when pieces move on the board.</p>
         </div>
         <button
           className={`btn sm ${sound ? "grape" : "ghost"}`}
@@ -77,12 +80,15 @@ function SettingsForm({
         </button>
       </section>
 
-      {profile.email && (
-        <section className="card stack-tight">
+      <section className="card row">
+        <div className="grow">
           <h2>Signed in</h2>
-          <p className="muted small">{profile.email}</p>
-        </section>
-      )}
+          {profile.email && <p className="muted small">{profile.email}</p>}
+        </div>
+        <button className="btn sm coral" onClick={onSignOut}>
+          Sign out
+        </button>
+      </section>
     </div>
   );
 }
