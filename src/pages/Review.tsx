@@ -5,6 +5,7 @@ import type { DrawShape } from "chessground/draw";
 import type { Key } from "chessground/types";
 import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
+import { EndIcon, FlipIcon, NextIcon, PrevIcon, StartIcon } from "../components/Icons";
 import { Board } from "../components/Board";
 import { Sheet } from "../components/Sheet";
 import { Loader } from "../components/Loader";
@@ -652,16 +653,16 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
               Best line
             </button>
             <button className="btn sm" onClick={() => goMain(0)} aria-label="Start">
-              ⏮
+              <StartIcon />
             </button>
             <button className="btn sm" onClick={back} aria-label="Previous move">
-              ◀
+              <PrevIcon />
             </button>
             <button className="btn sm" onClick={forward} aria-label="Next move">
-              ▶
+              <NextIcon />
             </button>
             <button className="btn sm" onClick={() => goMain(total)} aria-label="End">
-              ⏭
+              <EndIcon />
             </button>
             {analysis && (
               <button className="btn sm coral" onClick={nextMistake}>
@@ -672,7 +673,7 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
               ⋯
             </button>
             <button className="btn sm ghost flip" onClick={() => setFlipped((f) => !f)} aria-label="Flip board" title="Flip board (F)">
-              ⇅
+              <FlipIcon />
             </button>
           </div>
         </div>
@@ -681,13 +682,13 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
         <div className="stack-tight">
           <div className="sheet-tools">
             <button className="btn sm ghost" onClick={() => { goMain(0); setStatsOpen(false); }}>
-              ⏮ Start
+              <StartIcon /> Start
             </button>
             <button className="btn sm ghost" onClick={() => { goMain(total); setStatsOpen(false); }}>
-              End ⏭
+              End <EndIcon />
             </button>
             <button className="btn sm ghost" onClick={() => { setFlipped((f) => !f); setStatsOpen(false); }}>
-              ⇅ Flip
+              <FlipIcon /> Flip
             </button>
           </div>
           {evalStrip}

@@ -6,6 +6,7 @@ import type { DrawShape } from "chessground/draw";
 import type { Key } from "chessground/types";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { BackIcon, FlipIcon, RestartIcon } from "../components/Icons";
 import { Board } from "../components/Board";
 import { Loader } from "../components/Loader";
 import { MiniBoard } from "../components/MiniBoard";
@@ -137,7 +138,17 @@ function Shelf({ data, games, onOpen }: { data: Progress; games: GameRow[]; onOp
       <div className="row page-head">
         <h1>Opening Lab</h1>
         <span className="muted small grow desk-only">Pick an opening and a colour. Play the line, see what goes wrong, then spar.</span>
-        {slips > 0 && <span className="chip-btn on">{slips} slip{slips === 1 ? "" : "s"} to fix</span>}
+        {slips > 0 && (
+          <button
+            className="chip-btn on lab-slips"
+            onClick={() => {
+              const [id, side] = data.lessons[0].key.split(":");
+              onOpen(id, side as Side, "lessons");
+            }}
+          >
+            {slips} slip{slips === 1 ? "" : "s"} to fix
+          </button>
+        )}
       </div>
       <div className="lab-grid">
         {cards.map(({ o, white, black, fen }) => (
@@ -248,6 +259,7 @@ function Lab({
   const deviateAt = useRef(-1);
   const explored = useRef(new Map<string, Promise<Explorer | null>>());
   const stripRef = useRef<HTMLDivElement>(null);
+  const [table, setTable] = useState<Awaited<ReturnType<typeof loadOpenings>> | null>(null);
 
   const startFen = lesson?.fen ?? new Chess().fen();
   const { fen, history } = useMemo(() => {
@@ -270,6 +282,14 @@ function Lab({
     timers.current = [];
   };
   useEffect(() => stopAll, []);
+
+  useEffect(() => {
+    let live = true;
+    void loadOpenings().then((t) => live && setTable(t));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     stripRef.current?.scrollTo({ left: stripRef.current.scrollWidth, top: stripRef.current.scrollHeight });
@@ -808,15 +828,22 @@ function Lab({
           : "";
   const availableModes = MODES.filter((m) => m.id !== "lessons" || lessons.length > 0 || mode === "lessons");
   const yourTurnNow = myTurn && card.t === "turn";
+  // the exact variation the moves have reached so far (it follows you off the main line too)
+  const reached = (!lesson && table && sans.length ? nameOpening(table, sans)?.name : null) ?? opening.name;
 
   return (
     <div className="lab">
+      {/* back on the left, the opening you've reached on the right */}
+      <div className="row page-head lab-head">
+        <button className="btn sm ghost icon-btn" onClick={onExit} aria-label="Back to openings" title="Back to openings">
+          <BackIcon />
+        </button>
+        <span className="lab-title" title={`${reached} as ${side === "white" ? "White" : "Black"}`}>
+          <b>{reached}</b> <span className="muted">as {side === "white" ? "White" : "Black"}</span>
+        </span>
+      </div>
       <div className="trainer">
         <div className="board-col">
-          <div className="pbar">
-            <span className="pavatar" style={{ background: orientation === "white" ? "#2b2350" : "#fff" }} />
-            <b className="grow">{orientation === side ? "Opponent" : "You"}</b>
-          </div>
           <div className="board-area">
             <Board
               fen={fen}
@@ -829,28 +856,16 @@ function Lab({
               onMove={(o, d) => void onMove(o, d)}
             />
           </div>
-          <div className="pbar">
-            <span className="pavatar" style={{ background: orientation === "white" ? "#fff" : "#2b2350" }} />
-            <b className="grow">{orientation === side ? "You" : "Opponent"}</b>
-          </div>
         </div>
 
         <div className="side-col">
-          <div className="lab-head">
-            <button className="btn sm ghost" onClick={onExit} aria-label="Back to openings">
-              ←
-            </button>
-            <b className="grow lab-title">
-              {opening.name} <span className="muted">as {side === "white" ? "White" : "Black"}</span>
-            </b>
-            <div className="lab-modes">
+          <div className="lab-modes">
             {availableModes.map((m) => (
               <button key={m.id} className={`chip-btn ${mode === m.id ? "on" : ""}`} onClick={() => m.id !== mode && onMode(m.id)}>
                 {m.name}
-                  {m.id === "lessons" && <b>{lessons.length}</b>}
-                </button>
-              ))}
-            </div>
+                {m.id === "lessons" && <b>{lessons.length}</b>}
+              </button>
+            ))}
           </div>
 
           <div className={`card flat lab-card ${cardTone}`}>
@@ -884,19 +899,19 @@ function Lab({
               </button>
             )}
             {yourTurnNow && hasExplorer && !lesson && (
-              <button className="btn sm ghost" onClick={() => void commonMistakes()}>
-                Common mistakes
+              <button className="btn sm ghost" onClick={() => void commonMistakes()} title="Common mistakes club players make here">
+                Mistakes
               </button>
             )}
-            <button className="btn sm ghost" onClick={() => void askThreat()} disabled={!myTurn || card.t === "checking" || position.check}>
-              Their threat?
+            <button className="btn sm ghost" onClick={() => void askThreat()} disabled={!myTurn || card.t === "checking" || position.check} title="What would they play if it were their move?">
+              Threat?
             </button>
-            <button className="btn sm ghost" onClick={() => setOrientation((o) => (o === "white" ? "black" : "white"))} aria-label="Flip board">
-              ⇅
+            <button className="btn sm ghost icon-btn" onClick={() => setOrientation((o) => (o === "white" ? "black" : "white"))} aria-label="Flip board" title="Flip board">
+              <FlipIcon />
             </button>
             {mode !== "lessons" && card.t !== "plan" && (
-              <button className="btn sm ghost" onClick={begin} aria-label="Restart">
-                ↻
+              <button className="btn sm ghost icon-btn" onClick={begin} aria-label="Restart" title="Restart">
+                <RestartIcon />
               </button>
             )}
           </div>

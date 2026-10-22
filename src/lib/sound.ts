@@ -1,4 +1,5 @@
-// Board sounds: chess.com's default set, played straight from their CDN (not bundled with the app).
+// Board sounds: chess.com's default set, played straight from their CDN (not bundled with the app),
+// and a short buzz on phones that can vibrate (Android browsers; iPhones' Safari doesn't allow it).
 
 export type MoveSound = "move" | "capture" | "check" | "castle" | "promote";
 
@@ -19,6 +20,28 @@ export function soundEnabled(): boolean {
     return localStorage.getItem(STORAGE_KEY) !== "off";
   } catch {
     return true;
+  }
+}
+
+const HAPTICS_KEY = "pawnie.haptics";
+// a light tap for a move, a firmer one for a capture, two taps for a check
+const BUZZ: Record<MoveSound, number | number[]> = { move: 12, castle: 12, promote: 20, capture: 22, check: [18, 60, 18] };
+
+export const canVibrate = () => typeof navigator !== "undefined" && "vibrate" in navigator;
+
+export function hapticsEnabled(): boolean {
+  try {
+    return localStorage.getItem(HAPTICS_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setHapticsEnabled(on: boolean) {
+  try {
+    localStorage.setItem(HAPTICS_KEY, on ? "on" : "off");
+  } catch {
+    // only a preference
   }
 }
 
@@ -53,6 +76,7 @@ function sounds(): Partial<Record<MoveSound, HTMLAudioElement>> {
 }
 
 export function playMove(kind: MoveSound) {
+  if (hapticsEnabled() && canVibrate()) navigator.vibrate(BUZZ[kind]);
   if (!soundEnabled()) return;
   const base = sounds()[kind];
   if (!base) return;

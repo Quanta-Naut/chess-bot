@@ -282,10 +282,6 @@ function Solver({
   return (
     <div className="trainer">
       <div className="board-col">
-        <div className="pbar">
-          <span className="pavatar" style={{ background: me === "white" ? "#2b2350" : "#fff" }} />
-          <b className="grow">{puzzle.game.opponent}</b>
-        </div>
         <div className="board-area">
           <Board
             fen={shownFen}
@@ -297,10 +293,6 @@ function Solver({
             dests={status === "play" ? position.dests : new Map()}
             onMove={(o, d) => void onMove(o, d)}
           />
-        </div>
-        <div className="pbar">
-          <span className="pavatar" style={{ background: me === "white" ? "#fff" : "#2b2350" }} />
-          <b className="grow">You</b>
         </div>
       </div>
 

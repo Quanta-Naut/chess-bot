@@ -120,6 +120,8 @@ p { margin: 0 0 .8em; }
 .btn.coral { background: var(--coral); color: #fff; }
 .btn.ghost { background: var(--paper); }
 .btn.sm { padding: 4px 10px; font-size: .9rem; box-shadow: 1px 1px 0 var(--ink); }
+.btn .ico { width: 1.2em; height: 1.2em; vertical-align: -.25em; }
+.sheet-tools .btn .ico { margin: 0 .25em; }
 
 input[type="text"], input[type="email"], input[type="password"], select {
   font-family: var(--font-body); font-size: 1rem; font-weight: 600;
@@ -202,18 +204,18 @@ label { font-weight: 800; font-size: .9rem; display: block; margin-bottom: 4px; 
 @media (max-width: 520px) { .games-grid { gap: 10px; padding: 2px 6px 6px 2px; } .game-card { padding: 7px; gap: 6px; } .gc-meta { gap: 5px; } .gc-meta .result { width: 36px; } .gc-opp { font-size: .8rem; } }
 
 /* ---------- board ---------- */
+/* layers, bottom to top: the squares (painted on the wrapper), the coordinates, then chessground with a clear
+   background, so highlights and pieces sit over the coordinates instead of under them */
 .board-wrap {
   width: 100%; aspect-ratio: 1; position: relative;
-  border: 3px solid var(--line); border-radius: 10px;
-  background: var(--sq-light); overflow: visible;
-}
-.board-host, .board-host .cg-wrap { width: 100%; height: 100%; }
-.board-host { border-radius: 7px; overflow: hidden; }
-.board-host cg-board {
+  border: 3px solid var(--line); border-radius: 10px; overflow: visible;
   background-color: var(--sq-light);
   background-size: 25% 25%;
   background-image: conic-gradient(var(--sq-dark) 25%, transparent 0 50%, var(--sq-dark) 0 75%, transparent 0);
 }
+.board-host, .board-host .cg-wrap { width: 100%; height: 100%; }
+.board-host { position: relative; z-index: 1; border-radius: 7px; overflow: hidden; }
+.board-host cg-board { background: transparent; }
 /* chessground floors the board to a multiple of 8 device px, leaving a gap at the right/bottom */
 .board-host cg-container { width: 100% !important; height: 100% !important; }
 .board-host cg-board square.last-move { background-color: rgba(255, 201, 51, .55); }
@@ -222,7 +224,7 @@ label { font-weight: 800; font-size: .9rem; display: block; margin-bottom: 4px; 
 .board-host cg-board square.move-dest.oc { background: radial-gradient(transparent 72%, rgba(0, 0, 0, .22) 74%); }
 .board-host cg-board square.move-dest:hover { background: rgba(0, 0, 0, .1); }
 /* coordinates in the corners of the edge squares, in the colour of the other square */
-.coords-layer { position: absolute; inset: 0; pointer-events: none; z-index: 3; container-type: size; }
+.coords-layer { position: absolute; inset: 0; pointer-events: none; z-index: 0; container-type: size; }
 .coord { position: absolute; font: 800 max(9px, 3.1cqw)/1 var(--font-body); user-select: none; }
 .coord.on-light { color: color-mix(in srgb, var(--sq-dark) 75%, var(--ink)); }
 .coord.on-dark { color: var(--sq-light); }
@@ -313,7 +315,7 @@ label { font-weight: 800; font-size: .9rem; display: block; margin-bottom: 4px; 
 /* the spacer mirrors the flip button so the playback buttons stay centred */
 .controls .flip, .controls .flip-spacer { flex: none; width: 38px; }
 .controls .btn { white-space: nowrap; }
-.controls .flip { margin-left: auto; font-size: 1.1rem; padding: 4px 0; }
+.controls .flip { margin-left: auto; padding: 4px 0; }
 .controls .flip-spacer { margin-right: auto; }
 
 .moves {
@@ -490,6 +492,9 @@ kbd {
 .trainer .board-area { width: var(--sq); }
 .trainer .board-area .board-wrap { width: var(--sq); height: var(--sq); }
 
+/* no name bars here (Open game shows where the position came from), so the board takes their space too */
+.puzzles .trainer { --sq: min(100cqh, calc(100cqw - 20px - var(--side))); }
+.puzzles .trainer .side-col { margin-top: 0; }
 .puzzle-card { border-left: 6px solid var(--grape); }
 .puzzle-card { flex: none; }
 .puzzle-card.is-solved { border-left-color: #2fbf71; background: #eefaf2; }
@@ -542,6 +547,7 @@ kbd {
 /* ---------- opening lab ---------- */
 .lab-shelf { display: flex; flex-direction: column; gap: 12px; }
 .lab-shelf .page-head h1 { margin-right: 6px; }
+.lab-slips { margin-left: auto; flex: none; }
 .lab-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
 .lab-op { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-width: 0; }
 /* two rows of cards fit the screen: the board gets what the text and buttons leave */
@@ -565,12 +571,24 @@ kbd {
 .lab-pips span.on { background: #2fbf71; }
 .lab-stage { font-size: .75rem; font-weight: 700; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
-.lab { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+/* the board is the size it is in a bot game (the header row takes the space the name bars would),
+   and the header spans exactly the board and its panel */
+.lab {
+  height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 12px;
+  container-type: size; --side: 360px; --sq: min(calc(100cqh - 80px), calc(100cqw - 20px - var(--side)));
+}
+.lab .trainer { container-type: normal; align-items: center; --sq: inherit; }
+.lab .trainer .side-col { margin-top: 0; }
 .lab .side-col { gap: 10px; }
-.lab-head { display: flex; align-items: center; gap: 8px 8px; flex: none; min-width: 0; flex-wrap: wrap; }
-.lab-title { font-family: var(--font-head); font-size: 1.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lab-title .muted { font-weight: 500; }
-.lab-modes { display: flex; gap: 6px; flex: 1 0 100%; flex-wrap: wrap; }
+/* the header sits where the top name bar would be: back on the left, the opening on the right */
+.lab-head { justify-content: space-between; flex: none; flex-wrap: nowrap; height: 40px; width: calc(var(--sq) + 20px + var(--side)); max-width: 100%; align-self: center; }
+.lab-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; font-size: .95rem; }
+.lab-title b { font-family: var(--font-head); font-weight: 700; }
+.lab-title .muted { font-weight: 600; }
+.lab-head .icon-btn { flex: none; width: 36px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+/* the modes share the row above the card evenly */
+.lab-modes { display: flex; gap: 6px; flex: none; }
+.lab-modes .chip-btn { flex: 1 1 0; justify-content: center; }
 /* the buttons stay at the bottom of the card; only the text scrolls if it ever has to */
 .lab-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; border-left: 6px solid var(--grape); overflow: hidden; }
 .lab-card.bad { border-left-color: #ff5252; background: #fff0f0; }
@@ -594,7 +612,10 @@ kbd {
 .lab-moves { flex: none; display: flex; flex-wrap: wrap; gap: 4px 10px; max-height: 84px; overflow-y: auto; font-weight: 700; padding: 2px; }
 .lab-mv i { font-style: normal; color: var(--ink-soft); margin-right: 3px; font-weight: 600; }
 .lab-mv.off { color: #b8452a; }
-.lab-tools { flex: none; gap: 6px; flex-wrap: wrap; }
+/* one row that always fits: the text buttons share the width, the icon buttons stay square */
+.lab-tools { flex: none; gap: 6px; flex-wrap: nowrap; align-items: stretch; }
+.lab-tools .btn { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; flex: 1 1 auto; min-width: 0; padding: 6px; }
+.lab-tools .btn.icon-btn { flex: none; width: 40px; padding: 6px 0; }
 
 /* ---------- insights ---------- */
 .insights { display: flex; flex-direction: column; gap: 16px; }
@@ -698,11 +719,14 @@ kbd {
   body { -webkit-tap-highlight-color: transparent; }
   button { touch-action: manipulation; }
 
-  /* the sidebar becomes a tab bar along the bottom */
-  .shell { --tabbar: calc(58px + env(safe-area-inset-bottom)); height: 100dvh; flex-direction: column; overflow: hidden; }
+  /* the app is pinned to the screen's edges, and the sidebar becomes a tab bar at the end of it, in the flow: phones
+     disagree about 100dvh (address bar, gesture bar), but this way the bar always meets the bottom of the screen and
+     the page always ends exactly at its border. Below the bar (gesture area, overscroll) is white like the bar. */
+  html, body { background: var(--paper); }
+  .shell { position: fixed; inset: 0; height: auto; flex-direction: column; overflow: hidden; background: var(--cream); }
   .sidebar, .sidebar.open {
-    position: fixed; top: auto; bottom: 0; left: 0; right: 0; z-index: 50;
-    width: 100%; height: var(--tabbar); flex-direction: row; justify-content: space-around; gap: 2px;
+    position: relative; order: 2; z-index: 50; flex: none;
+    width: 100%; height: auto; flex-direction: row; justify-content: space-around; gap: 2px;
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
     border-right: none; border-top: 2px solid var(--line); transition: none; overflow: visible;
   }
@@ -713,10 +737,13 @@ kbd {
 
   /* each page fills the space above the tab bar; only lists scroll, inside their own box */
   .page {
-    flex: none; width: 100%; max-width: 100%; height: calc(100dvh - var(--tabbar));
-    padding: max(10px, env(safe-area-inset-top)) 12px 10px; overflow-y: auto; overscroll-behavior: contain;
+    flex: 1 1 auto; min-height: 0; width: 100%; max-width: 100%; height: auto;
+    padding: max(10px, env(safe-area-inset-top)) 12px 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
   }
   .page > .review, .page > .puzzles, .page > .play, .page > .lab, .page > .lab-shelf, .page > .insights, .page > .games-page { height: 100%; min-height: 0; }
+  /* pages with buttons at the bottom keep them just clear of the bar's border; lists scroll right up to it */
+  .page > .review, .page > .puzzles, .page > .play, .page > .lab { padding-bottom: 8px; box-sizing: border-box; }
+  .page > :not(.review, .puzzles, .play, .lab, .lab-shelf, .games-page, .insights) { padding-bottom: 12px; }
   h1 { font-size: 1.45rem; }
   .page-head { flex-wrap: nowrap; }
 
@@ -781,6 +808,12 @@ kbd {
 
   /* puzzles */
   .puzzles { gap: 8px; }
+  /* board under the header, card under the board; spare height goes to the card (as in the Opening lab) */
+  .puzzles .trainer { container-type: size; }
+  .puzzles .trainer .board-col { flex: none; container-type: normal; }
+  .puzzles .trainer .board-col > * { --b: min(100cqw, calc(100cqh - 158px)); }
+  .puzzles .trainer .side-col { flex: 1 1 0; min-height: 0; }
+  .puzzles .puzzle-card { flex: 1 1 0; height: auto; min-height: 104px; justify-content: flex-start; }
   .pick-btn { margin-left: auto; white-space: nowrap; max-width: 62%; overflow: hidden; text-overflow: ellipsis; }
   .pick-btn b { color: var(--ink-soft); }
   .puzzle-info { display: none; }
@@ -870,22 +903,24 @@ kbd {
   .lab-side-top { font-size: .78rem; gap: 4px; }
   .lab-stage { font-size: .68rem; }
   .lab .trainer .side-col { gap: 6px; }
-  .lab-head { order: -2; }
-  .lab-title { font-size: 1rem; }
-  .lab-head { flex-wrap: nowrap; }
-  .lab-modes { flex: none; flex-wrap: nowrap; }
-  .lab-modes .chip-btn { font-size: .78rem; padding: 2px 9px; white-space: nowrap; }
-  .lab .trainer .board-col { flex: 0 1 calc(100vw + 40px); }
-  .lab .trainer .side-col { flex: 1 0 auto; }
-  .lab-card { flex: 1 1 0; min-height: 140px; contain: size; padding: 9px 12px; gap: 4px; }
+  .lab { gap: 8px; }
+  .lab-head { height: 28px; width: 100%; }
+  .lab-head .icon-btn { height: 28px; }
+  .lab-title { font-size: .9rem; }
+  .lab-modes .chip-btn { font-size: .85rem; padding: 4px 8px; white-space: nowrap; }
+  /* same board as Puzzles: the space their two name bars and card take (60 + 8 + 150) goes to this panel */
+  .lab .trainer { flex: 1 1 0; min-height: 0; container-type: size; align-items: stretch; }
+  .lab .trainer .board-col { flex: none; container-type: normal; }
+  .lab .trainer .board-col > * { --b: min(100cqw, calc(100cqh - 218px)); }
+  .lab .trainer .side-col { flex: 1 1 0; min-height: 0; }
+  .lab-card { flex: 1 1 0; min-height: 0; contain: size; padding: 9px 12px; gap: 4px; }
   .lab-card-title { font-size: 1.08rem; }
   .lab-card-body p, .lab-note, .lab-threat { font-size: .88rem; line-height: 1.32; }
   .lab-choice { padding: 5px 10px; font-size: .86rem; }
   .lab-choices { gap: 4px; }
   .lab-card-actions .btn { padding: 4px 12px; font-size: .9rem; }
   .lab-moves { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; white-space: nowrap; max-height: none; font-size: .9rem; }
-  .lab-tools { flex-wrap: nowrap; overflow-x: auto; }
-  .lab-tools .btn { white-space: nowrap; }
+  .lab-tools { gap: 5px; }
 }
 
 @media (max-width: 520px) {

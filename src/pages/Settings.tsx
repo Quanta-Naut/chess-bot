@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { playMove, setSoundEnabled, soundEnabled } from "../lib/sound";
+import { canVibrate, hapticsEnabled, playMove, setHapticsEnabled, setSoundEnabled, soundEnabled } from "../lib/sound";
 import { BOARD_THEMES, boardTheme, isBoardTheme, setBoardTheme } from "../lib/boardTheme";
 import { Loader } from "../components/Loader";
 import { MiniBoard } from "../components/MiniBoard";
@@ -30,6 +30,7 @@ function SettingsForm({
   const [lichess, setLichess] = useState(profile.lichess ?? "");
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState(soundEnabled);
+  const [haptics, setHaptics] = useState(hapticsEnabled);
   const saveTheme = useMutation(api.profile.setBoardTheme);
   const [theme, setTheme] = useState(() => (isBoardTheme(profile.boardTheme) ? profile.boardTheme : boardTheme()));
   // your colour leads the list; the order is fixed while the page is open, so nothing jumps under your finger
@@ -88,6 +89,26 @@ function SettingsForm({
           {sound ? "On" : "Off"}
         </button>
       </section>
+
+      {canVibrate() && (
+        <section className="card row">
+          <div className="grow">
+            <h2>Vibration</h2>
+            <p className="muted small desk-only">A short buzz when a piece moves.</p>
+          </div>
+          <button
+            className={`btn sm ${haptics ? "grape" : "ghost"}`}
+            aria-pressed={haptics}
+            onClick={() => {
+              setHapticsEnabled(!haptics);
+              setHaptics(!haptics);
+              if (!haptics) navigator.vibrate(22);
+            }}
+          >
+            {haptics ? "On" : "Off"}
+          </button>
+        </section>
+      )}
 
       <section className="card stack-tight">
         <h2>Board colour</h2>
