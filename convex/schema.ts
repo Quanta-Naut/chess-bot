@@ -44,6 +44,7 @@ export default defineSchema({
     chesscom: v.optional(v.string()),
     lichess: v.optional(v.string()),
     model: v.optional(v.string()),
+    boardTheme: v.optional(v.string()), // board colour id (src/lib/boardTheme.ts), the same on every device
   }).index("by_user", ["userId"]),
 
   games: defineTable({
@@ -98,6 +99,35 @@ export default defineSchema({
     streak: v.number(),
     best: v.number(),
   }).index("by_user", ["userId"]),
+
+  // Opening Lab: how far you've got with one opening as one colour (key = "<opening id>:<white|black>")
+  labProgress: defineTable({
+    userId: v.id("users"),
+    key: v.string(),
+    learned: v.boolean(),
+    /** practice runs with no slips */
+    practiced: v.number(),
+    /** sparring runs with no slips; each one pushes the next review further out */
+    sparred: v.number(),
+    lastAt: v.number(),
+    /** when a sparring review is due again (set after a clean sparring run) */
+    due: v.optional(v.number()),
+  }).index("by_user_and_key", ["userId", "key"]),
+
+  // Opening Lab: a move that got punished, saved so you can fix it later
+  labLessons: defineTable({
+    userId: v.id("users"),
+    key: v.string(),
+    fen: v.string(),
+    played: v.string(),
+    best: v.string(),
+    reason: v.string(),
+    /** times found the good move since; the lesson is done at 2 */
+    fixed: v.number(),
+    at: v.number(),
+  })
+    .index("by_user_and_key", ["userId", "key"])
+    .index("by_user_and_fen", ["userId", "fen"]),
 
   coachNotes: defineTable({
     userId: v.id("users"),

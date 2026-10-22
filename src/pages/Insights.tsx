@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
@@ -93,7 +93,7 @@ function Report({ games, openPuzzles, openGame }: Props & { games: Game[] }) {
     });
 
     // games come newest first; the trend reads left (old) to right (new)
-    const trend = [...games].reverse().map((g) => g.accuracy);
+    const trend = [...games].reverse().map((g) => ({ accuracy: g.accuracy, playedAt: g.playedAt, opponent: g.opponent, result: resultFor(g) }));
     const recent = avg(games.slice(0, 10).map((g) => g.accuracy));
     const earlier = games.length > 10 ? avg(games.slice(10, 20).map((g) => g.accuracy)) : null;
 
@@ -250,8 +250,7 @@ function Report({ games, openPuzzles, openGame }: Props & { games: Game[] }) {
 
         <section className="card flat stack-tight t-overview">
           <h2>Accuracy over time</h2>
-          <Trend values={report.trend} />
-          <p className="muted small">Oldest on the left, newest on the right.</p>
+          <Trend points={report.trend} />
         </section>
       </div>
 
@@ -303,22 +302,116 @@ function Stat({ label, value, note, good }: { label: string; value: string; note
   );
 }
 
-function Trend({ values }: { values: number[] }) {
-  const W = 300;
-  const H = 80;
-  if (values.length < 2) return <p className="muted small">Needs a few more games.</p>;
-  const lo = Math.max(0, Math.min(...values) - 5);
-  const hi = Math.min(100, Math.max(...values) + 5);
-  const x = (i: number) => (i / (values.length - 1)) * W;
-  const y = (v: number) => H - ((v - lo) / (hi - lo || 1)) * H;
+interface TrendPoint {
+  accuracy: number;
+  playedAt: number;
+  opponent: string;
+  result: string;
+}
+
+const PAD = { top: 10, right: 12, bottom: 22, left: 34 };
+const day = (t: number) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+
+/** Accuracy per game (dots) with a 5-game rolling average (line); hover or drag to read any game. */
+function Trend({ points }: { points: TrendPoint[] }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [hover, setHover] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const values = points.map((p) => p.accuracy);
   // a 5-game rolling average shows the direction better than single games
-  const rolling = values.map((_, i) => avg(values.slice(Math.max(0, i - 4), i + 1)));
+  const rolling = useMemo(() => values.map((_, i) => avg(values.slice(Math.max(0, i - 4), i + 1))), [values]);
+
+  if (points.length < 2) return <p className="muted small">Needs a few more games.</p>;
+
+  const lo = Math.max(0, Math.floor((Math.min(...values) - 2) / 10) * 10);
+  const hi = Math.min(100, Math.ceil((Math.max(...values) + 2) / 10) * 10);
+  const ticks: number[] = [];
+  for (let t = lo; t <= hi; t += hi - lo > 40 ? 20 : 10) ticks.push(t);
+  const iw = Math.max(0, size.w - PAD.left - PAD.right);
+  const ih = Math.max(0, size.h - PAD.top - PAD.bottom);
+  const x = (i: number) => PAD.left + (i / (points.length - 1)) * iw;
+  const y = (v: number) => PAD.top + ih - ((v - lo) / (hi - lo || 1)) * ih;
+  const line = rolling.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const area = `${line}L${x(points.length - 1).toFixed(1)},${PAD.top + ih}L${PAD.left},${PAD.top + ih}Z`;
+  // about four dates along the bottom
+  const step = Math.max(1, Math.round((points.length - 1) / 3));
+  const dateTicks = [...new Set([...Array.from({ length: Math.floor((points.length - 1) / step) + 1 }, (_, k) => k * step), points.length - 1])].filter(
+    (i, k, all) => k === 0 || i - all[k - 1] >= step * 0.6,
+  );
+
+  const pick = (clientX: number) => {
+    const r = box.current!.getBoundingClientRect();
+    const i = Math.round(((clientX - r.left - PAD.left) / (iw || 1)) * (points.length - 1));
+    setHover(Math.max(0, Math.min(points.length - 1, i)));
+  };
+  const h = hover === null ? null : points[hover];
+  const tipLeft = hover === null ? 0 : Math.min(Math.max(x(hover), 70), size.w - 70);
+
   return (
-    <svg className="trend" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      {values.map((v, i) => (
-        <circle key={i} cx={x(i)} cy={y(v)} r="2.5" className="trend-dot" />
-      ))}
-      <polyline points={rolling.map((v, i) => `${x(i)},${y(v)}`).join(" ")} className="trend-line" />
-    </svg>
+    <div
+      className="trend"
+      ref={box}
+      onPointerMove={(e) => pick(e.clientX)}
+      onPointerDown={(e) => pick(e.clientX)}
+      onPointerLeave={(e) => e.pointerType === "mouse" && setHover(null)}
+      role="img"
+      aria-label={`Accuracy over your last ${points.length} games, from ${values[0].toFixed(0)}% to ${values[values.length - 1].toFixed(0)}%`}
+    >
+      {size.w > 0 && (
+        <svg width={size.w} height={size.h}>
+          <defs>
+            <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="var(--grape)" stopOpacity=".22" />
+              <stop offset="1" stopColor="var(--grape)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={PAD.left} x2={size.w - PAD.right} y1={y(t)} y2={y(t)} className="trend-grid" />
+              <text x={PAD.left - 6} y={y(t)} className="trend-axis" textAnchor="end" dominantBaseline="middle">
+                {t}%
+              </text>
+            </g>
+          ))}
+          {dateTicks.map((i, k) => (
+            <text key={i} x={x(i)} y={size.h - 6} className="trend-axis" textAnchor={k === 0 ? "start" : i === points.length - 1 ? "end" : "middle"}>
+              {day(points[i].playedAt)}
+            </text>
+          ))}
+          <path d={area} fill="url(#trend-fill)" />
+          {values.map((v, i) => (
+            <circle key={i} cx={x(i)} cy={y(v)} r={2.5} className="trend-dot" />
+          ))}
+          <path d={line} className="trend-line" />
+          {h && hover !== null && (
+            <g>
+              <line x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + ih} className="trend-cross" />
+              <circle cx={x(hover)} cy={y(h.accuracy)} r={5} className="trend-hit" />
+              <circle cx={x(hover)} cy={y(rolling[hover])} r={4} className="trend-hit-avg" />
+            </g>
+          )}
+        </svg>
+      )}
+      {h && hover !== null && (
+        <div className="trend-tip" style={{ left: tipLeft }}>
+          <span className="muted">
+            {day(h.playedAt)} · vs {h.opponent}
+          </span>
+          <span>
+            <b>{h.accuracy.toFixed(1)}%</b> accuracy <span className={`trend-res ${h.result}`}>{h.result === "win" ? "Won" : h.result === "loss" ? "Lost" : "Draw"}</span>
+          </span>
+          <span className="muted">5-game average {rolling[hover].toFixed(1)}%</span>
+        </div>
+      )}
+    </div>
   );
 }

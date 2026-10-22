@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as coach from "../coach.js";
 import type * as games from "../games.js";
 import type * as http from "../http.js";
+import type * as lab from "../lab.js";
 import type * as openings from "../openings.js";
 import type * as profile from "../profile.js";
 import type * as puzzles from "../puzzles.js";
@@ -27,6 +28,7 @@ declare const fullApi: ApiFromModules<{
   coach: typeof coach;
   games: typeof games;
   http: typeof http;
+  lab: typeof lab;
   openings: typeof openings;
   profile: typeof profile;
   puzzles: typeof puzzles;

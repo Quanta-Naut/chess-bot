@@ -2,7 +2,12 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { playMove, setSoundEnabled, soundEnabled } from "../lib/sound";
+import { BOARD_THEMES, boardTheme, isBoardTheme, setBoardTheme } from "../lib/boardTheme";
 import { Loader } from "../components/Loader";
+import { MiniBoard } from "../components/MiniBoard";
+
+// an Italian Game middlegame, to see the colour with pieces on it
+const PREVIEW_FEN = "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2PP1N2/PP3PPP/RNBQ1RK1 w - - 0 7";
 
 export function Settings({ onSaved, onSignOut }: { onSaved: () => void; onSignOut: () => void }) {
   const profile = useQuery(api.profile.get);
@@ -16,7 +21,7 @@ function SettingsForm({
   onSaved,
   onSignOut,
 }: {
-  profile: { chesscom?: string; lichess?: string; email?: string };
+  profile: { chesscom?: string; lichess?: string; boardTheme?: string; email?: string };
   onSaved: () => void;
   onSignOut: () => void;
 }) {
@@ -25,6 +30,10 @@ function SettingsForm({
   const [lichess, setLichess] = useState(profile.lichess ?? "");
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState(soundEnabled);
+  const saveTheme = useMutation(api.profile.setBoardTheme);
+  const [theme, setTheme] = useState(() => (isBoardTheme(profile.boardTheme) ? profile.boardTheme : boardTheme()));
+  // your colour leads the list; the order is fixed while the page is open, so nothing jumps under your finger
+  const [themeOrder] = useState(() => [...BOARD_THEMES].sort((a, b) => Number(b.id === theme) - Number(a.id === theme)));
   const changed = chesscom.trim() !== (profile.chesscom ?? "") || lichess.trim() !== (profile.lichess ?? "");
 
   const save = async () => {
@@ -78,6 +87,31 @@ function SettingsForm({
         >
           {sound ? "On" : "Off"}
         </button>
+      </section>
+
+      <section className="card stack-tight">
+        <h2>Board colour</h2>
+        <div className="theme-row">
+          {themeOrder.map((t) => (
+            <button
+              key={t.id}
+              className={`theme-card ${theme === t.id ? "on" : ""}`}
+              onClick={() => {
+                setBoardTheme(t.id);
+                setTheme(t.id);
+                void saveTheme({ theme: t.id });
+              }}
+              aria-pressed={theme === t.id}
+              style={{ ["--sq-dark" as string]: t.dark }}
+            >
+              <MiniBoard fen={PREVIEW_FEN} orientation="white" />
+              <span className="theme-name">
+                {t.name}
+                {theme === t.id && <span aria-hidden> ✓</span>}
+              </span>
+            </button>
+          ))}
+        </div>
       </section>
 
       <section className="card row">

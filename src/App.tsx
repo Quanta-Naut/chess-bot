@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Authenticated, AuthLoading, Unauthenticated } from "convex/react";
+import { Authenticated, AuthLoading, Unauthenticated, useMutation, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { SignIn } from "./components/SignIn";
 import { BackgroundAnalysis } from "./components/BackgroundAnalysis";
@@ -12,6 +12,8 @@ import { Play } from "./pages/Play";
 import { Puzzles } from "./pages/Puzzles";
 import { Review } from "./pages/Review";
 import { Settings } from "./pages/Settings";
+import { api } from "../convex/_generated/api";
+import { boardTheme, isBoardTheme, setBoardTheme } from "./lib/boardTheme";
 
 // The address bar is the source of truth: "/" games, "/<page>" for the other pages, "/g/<code>" one game's review.
 const PAGES: Page[] = ["puzzles", "insights", "play", "openings", "settings"];
@@ -28,8 +30,25 @@ function parse(path: string): Route {
   return { page: page ?? "games" };
 }
 
+/** Keep the board colour the same on every device: the account's colour wins over this browser's copy. */
+function useAccountBoardTheme() {
+  const profile = useQuery(api.profile.get);
+  const save = useMutation(api.profile.setBoardTheme);
+  const saved = profile?.boardTheme;
+  useEffect(() => {
+    if (!profile) return;
+    if (isBoardTheme(saved)) {
+      if (saved !== boardTheme()) setBoardTheme(saved);
+    } else {
+      // first time on an account: keep the colour this device already uses
+      void save({ theme: boardTheme() });
+    }
+  }, [profile, saved, save]);
+}
+
 function Shell() {
   const { signOut } = useAuthActions();
+  useAccountBoardTheme();
   const [route, setRoute] = useState(() => parse(window.location.pathname));
   const { page, code } = route;
 

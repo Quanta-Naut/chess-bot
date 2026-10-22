@@ -180,8 +180,7 @@ function Setup({ onStart, openGame }: { onStart: (elo: number, side: Side) => vo
             <p className="muted small desk-only">It starts at your rating. Go a little above it to be pushed, or below it to practise converting wins.</p>
           </div>
 
-          <div className="card flat stack-tight play-as">
-            <span className="muted small">Play as</span>
+          <div className="card flat stack-tight play-as" role="group" aria-label="Play as">
             <div className="side-pick">
               {(["white", "random", "black"] as const).map((s) => (
                 <button key={s} className={`side-opt ${side === s ? "on" : ""}`} onClick={() => setSide(s)}>
