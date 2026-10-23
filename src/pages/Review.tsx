@@ -546,7 +546,8 @@ function ReviewView({ game, replay }: { game: Doc<"games">; replay: Replay }) {
         <PlayerBar color={top} name={name(top)} accuracy={summaries?.[top].accuracy} />
         <div className="board-area">
           <div className="board-line">
-            <div className="evalbar" title="Evaluation">
+            <div className={`evalbar ${bottom === "black" ? "flipped" : ""}`} title="Evaluation">
+              {/* the bottom side's share, in its own colour */}
               <div className="white" style={{ height: `${bottom === "white" ? whitePct : 100 - whitePct}%` }} />
             </div>
             <Board

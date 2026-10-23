@@ -258,6 +258,8 @@ label { font-weight: 800; font-size: .9rem; display: block; margin-bottom: 4px; 
   background: var(--ink); overflow: hidden;
 }
 .evalbar .white { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; transition: height .25s; }
+.evalbar.flipped { background: #fff; }
+.evalbar.flipped .white { background: var(--ink); }
 
 .pbar { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 2px; font-size: 1.05rem; min-width: 0; flex: none; }
 .pbar b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
